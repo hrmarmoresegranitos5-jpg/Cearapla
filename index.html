@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>Ceará Planejados · Orçamentos</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="top">
+  <img src="icons/icon-192.png" alt="Ceará Planejados">
+  <div class="titles">
+    <h1>Ceará Planejados</h1>
+    <span>Orçamentos em PDF</span>
+  </div>
+</header>
+
+<main>
+
+  <div class="card" id="pdfCard" style="display:none;border-color:var(--gold);">
+    <h2>PDF pronto</h2>
+    <a id="pdfLink" href="#">⬇️ Baixar orçamento em PDF</a>
+    <p>Se o navegador abrir o PDF em vez de baixar, use o menu do navegador (⋮) → "Baixar página" ou toque e segure o botão acima.</p>
+  </div>
+
+  <div class="card">
+    <h2>Cliente</h2>
+    <label>Nome do cliente</label>
+    <input type="text" id="cliNome" placeholder="Nome completo">
+    <div class="row2">
+      <div>
+        <label>WhatsApp / Telefone</label>
+        <input type="tel" id="cliTel" placeholder="(74) 9....">
+      </div>
+      <div>
+        <label>Validade (dias)</label>
+        <input type="number" id="validade" value="7" min="1">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Itens do orçamento</h2>
+    <div id="itensWrap"></div>
+    <button type="button" class="add-item" id="btnAddItem">+ Adicionar item</button>
+  </div>
+
+  <div class="card">
+    <h2>Desconto à vista</h2>
+    <label>Desconto para pagamento à vista (%)</label>
+    <input type="number" id="descontoPct" value="10" min="0" max="100" step="0.5">
+    <div style="margin-top:14px;">
+      <div class="totals-line"><span class="lbl">Total (parcelado)</span><span class="val" id="totBruto">R$ 0,00</span></div>
+      <div class="totals-line"><span class="lbl">Desconto</span><span class="val" id="totDesc">- R$ 0,00</span></div>
+      <div class="totals-line big"><span class="lbl">Total à vista</span><span class="val" id="totLiquido">R$ 0,00</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Histórico de orçamentos <span class="desc-badge" id="histCount">0</span></h2>
+    <div id="histWrap"><div class="empty">Nenhum orçamento salvo ainda</div></div>
+  </div>
+
+</main>
+
+<footer class="bar">
+  <button id="btnNovo">Limpar</button>
+  <button id="btnPdf">Gerar PDF</button>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="app.js"></script>
+
+<script>
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('sw.js').catch(function(){});
+    });
+  }
+</script>
+
+</body>
+</html>
