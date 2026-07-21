@@ -221,9 +221,10 @@
 
     itens.forEach(function(item, idx){
       var descLines = doc.splitTextToSize(item.desc || '(sem descrição)', colDescW);
-      var blockH = Math.max(descLines.length * 5.6, 7) + 4;
+      var lineH = 5.6;
 
-      if(y + blockH > 275){
+      // garante espaço para pelo menos o cabeçalho do item (número + valor) antes de começar
+      if(y + lineH + 4 > 275){
         doc.addPage();
         y = 18;
       }
@@ -233,16 +234,25 @@
       doc.setTextColor(goldRGB[0],goldRGB[1],goldRGB[2]);
       doc.text(String(idx+1)+'.', marginX, y);
 
-      doc.setFont('helvetica','normal');
-      doc.setTextColor(darkRGB[0],darkRGB[1],darkRGB[2]);
-      doc.setFontSize(11.5);
-      doc.text(descLines, marginX+6, y);
-
       doc.setFont('helvetica','bold');
       doc.setTextColor(darkRGB[0],darkRGB[1],darkRGB[2]);
       doc.text(fmtBRL(item.valor), pageW-marginX, y, {align:'right'});
 
-      y += blockH;
+      doc.setFont('helvetica','normal');
+      doc.setTextColor(darkRGB[0],darkRGB[1],darkRGB[2]);
+      doc.setFontSize(11.5);
+
+      // desenha a descrição linha a linha, quebrando a página apenas quando necessário
+      descLines.forEach(function(line){
+        if(y + lineH > 275){
+          doc.addPage();
+          y = 18;
+        }
+        doc.text(line, marginX+6, y);
+        y += lineH;
+      });
+
+      y += 4;
       doc.setDrawColor(240,240,240);
       doc.setLineWidth(0.2);
       doc.line(marginX, y-3, pageW-marginX, y-3);
