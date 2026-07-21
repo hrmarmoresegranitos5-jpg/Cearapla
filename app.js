@@ -363,7 +363,7 @@
         resolve();
       };
       img.onerror = function(){ resolve(); };
-      img.src = 'icons/icon-512.png';
+      img.src = 'icon-512.png';
     });
   }
 
