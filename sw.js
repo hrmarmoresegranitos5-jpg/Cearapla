@@ -1,12 +1,12 @@
-var CACHE_NAME = 'cp-orcamentos-v1';
+var CACHE_NAME = 'cp-orcamentos-v2';
 var ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
+  './icon-192.png?v=2',
+  './icon-512.png?v=2',
   'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
 ];
 
