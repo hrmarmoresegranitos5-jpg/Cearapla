@@ -146,12 +146,12 @@
     font-weight:700;
     cursor:pointer;
   }
-  #btnNovo{
+  #btnNovo,#btnRecNovo{
     background:var(--panel2);
     color:var(--text);
     border:1px solid var(--border);
   }
-  #btnPdf{
+  #btnPdf,#btnRecPdf{
     background:linear-gradient(135deg,var(--gold-l),var(--gold));
     color:#1c1406;
   }
@@ -181,3 +181,49 @@
     color:#1c1406;font-weight:700;text-decoration:none;font-size:14.5px;
   }
   #pdfCard p{font-size:11.5px;color:var(--muted);margin:10px 0 0;text-align:center;}
+
+  /* ---------- Abas e comprovante ---------- */
+  nav.tabs{
+    display:flex;gap:8px;padding:10px 16px;
+    background:rgba(10,12,15,0.9);
+    border-bottom:1px solid var(--border);
+    position:sticky;top:75px;z-index:19;
+    backdrop-filter:blur(6px);
+  }
+  nav.tabs .tab{
+    flex:1;padding:10px;border-radius:10px;
+    border:1px solid var(--border);background:var(--panel2);
+    color:var(--muted);font-size:13.5px;font-weight:700;cursor:pointer;
+  }
+  nav.tabs .tab.active{
+    background:linear-gradient(135deg,var(--gold-l),var(--gold));
+    color:#1c1406;border-color:transparent;
+  }
+  [hidden]{display:none !important;}
+  select{
+    width:100%;
+    background:var(--panel2);
+    border:1px solid var(--border);
+    color:var(--text);
+    border-radius:10px;
+    padding:11px 12px;
+    font-size:14.5px;
+    font-family:inherit;
+  }
+  select:focus{outline:none;border-color:var(--gold);}
+  input[type=text]{min-width:0;}
+  .hint{font-size:12px;color:var(--muted);margin:0 0 4px;line-height:1.4;}
+  label .opt{color:var(--muted);font-weight:400;opacity:.8;margin-left:4px;}
+  .ghost-btn{
+    width:100%;margin-top:10px;padding:12px;border-radius:10px;
+    border:1px solid var(--gold);background:transparent;
+    color:var(--gold-l);font-size:13.5px;font-weight:700;cursor:pointer;
+  }
+  .hist .h-actions{display:flex;gap:6px;flex-shrink:0;}
+  #recPdfCard a{
+    display:block;text-align:center;padding:14px;border-radius:10px;
+    background:linear-gradient(135deg,var(--gold-l),var(--gold));
+    color:#1c1406;font-weight:700;text-decoration:none;font-size:14.5px;
+  }
+  #recPdfCard p{font-size:11.5px;color:var(--muted);margin:10px 0 0;text-align:center;}
+  #recTotSaldo.quitado{color:var(--ok);}

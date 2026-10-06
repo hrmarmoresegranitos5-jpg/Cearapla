@@ -1,4 +1,4 @@
-var CACHE_NAME = 'cp-orcamentos-v2';
+var CACHE_NAME = 'cp-orcamentos-v3';
 var ASSETS = [
   './',
   './index.html',

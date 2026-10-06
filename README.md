@@ -13,6 +13,15 @@ sw.js            → service worker (funciona offline / instala como app)
 icons/           → ícones do app (gerados a partir do logo)
 ```
 
+## Comprovante de pagamento
+
+Aba **Comprovante** no topo do app. Dois jeitos de usar:
+
+- **A partir de um orçamento:** no histórico, toque em **Comprovante** (ou, logo depois de gerar o PDF do orçamento, em "Criar comprovante deste orçamento"). Cliente, serviço, nº do orçamento e total já vêm preenchidos; informe o valor recebido.
+- **Avulso:** preencha tudo manualmente na aba Comprovante.
+
+Se o mesmo orçamento já tem comprovantes, o app soma o que foi pago antes e mostra o saldo certo. O CNPJ da empresa é configurado em `app.js` (campo `cnpj` em `EMPRESA`); enquanto estiver vazio ele não aparece no PDF.
+
 ## Como publicar no GitHub Pages
 
 1. Crie um repositório novo no GitHub (ex: `ceara-planejados-orcamentos`)

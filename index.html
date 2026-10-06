@@ -20,12 +20,18 @@
   </div>
 </header>
 
-<main>
+<nav class="tabs" id="tabs">
+  <button type="button" class="tab active" data-view="orc">Orçamento</button>
+  <button type="button" class="tab" data-view="rec">Comprovante</button>
+</nav>
+
+<main id="viewOrc">
 
   <div class="card" id="pdfCard" style="display:none;border-color:var(--gold);">
     <h2>PDF pronto</h2>
     <a id="pdfLink" href="#">⬇️ Baixar orçamento em PDF</a>
     <p>Se o navegador abrir o PDF em vez de baixar, use o menu do navegador (⋮) → "Baixar página" ou toque e segure o botão acima.</p>
+    <button type="button" class="ghost-btn" id="btnRecDoOrc">Criar comprovante deste orçamento</button>
   </div>
 
   <div class="card">
@@ -68,9 +74,98 @@
 
 </main>
 
-<footer class="bar">
+<footer class="bar" id="barOrc">
   <button id="btnNovo">Limpar</button>
   <button id="btnPdf">Gerar PDF</button>
+</footer>
+
+<main id="viewRec" hidden>
+
+  <div class="card" id="recPdfCard" style="display:none;border-color:var(--gold);">
+    <h2>Comprovante pronto</h2>
+    <a id="recPdfLink" href="#">⬇️ Baixar comprovante em PDF</a>
+    <p>Se o navegador abrir o PDF em vez de baixar, use o menu do navegador (⋮) → "Baixar página" ou toque e segure o botão acima.</p>
+  </div>
+
+  <div class="card">
+    <h2>Pagamento recebido</h2>
+    <p class="hint" id="recOrigem">Comprovante avulso: preencha os dados manualmente. Para partir de um orçamento, toque em "Comprovante" no histórico.</p>
+
+    <label>Nome do cliente</label>
+    <input type="text" id="recCliente" placeholder="Nome completo">
+
+    <div class="row2">
+      <div>
+        <label>Serviço</label>
+        <input type="text" id="recServico" placeholder="Ex: Cozinha planejada">
+      </div>
+      <div>
+        <label>Nº do orçamento</label>
+        <input type="text" id="recOrc" inputmode="numeric" placeholder="Opcional">
+      </div>
+    </div>
+
+    <div class="row2">
+      <div>
+        <label>Tipo</label>
+        <select id="recTipo">
+          <option>Entrada (aceito)</option>
+          <option>Parcela</option>
+          <option>Pagamento final</option>
+        </select>
+      </div>
+      <div>
+        <label>Forma de pagamento</label>
+        <select id="recForma">
+          <option>Dinheiro</option>
+          <option>Pix</option>
+          <option>Cartão de crédito</option>
+          <option>Cartão de débito</option>
+          <option>Transferência</option>
+          <option>Boleto</option>
+          <option>Cheque</option>
+        </select>
+      </div>
+    </div>
+
+    <label>Data do lançamento</label>
+    <input type="date" id="recData">
+  </div>
+
+  <div class="card">
+    <h2>Valores</h2>
+    <div class="row2">
+      <div>
+        <label>Valor total do serviço (R$)</label>
+        <input type="text" id="recTotal" inputmode="decimal" placeholder="0,00">
+      </div>
+      <div>
+        <label>Valor deste lançamento (R$)</label>
+        <input type="text" id="recValor" inputmode="decimal" placeholder="0,00">
+      </div>
+    </div>
+    <label>Já pago antes (R$) <span class="opt">opcional</span></label>
+    <input type="text" id="recAnterior" inputmode="decimal" placeholder="0,00">
+    <label>Aviso sobre o saldo</label>
+    <input type="text" id="recObs" value="A ser pago na entrega e instalação do serviço">
+
+    <div style="margin-top:14px;">
+      <div class="totals-line"><span class="lbl">Total do serviço</span><span class="val" id="recTotTotal">R$ 0,00</span></div>
+      <div class="totals-line"><span class="lbl">Pago antes + este lançamento</span><span class="val" id="recTotPago">R$ 0,00</span></div>
+      <div class="totals-line big"><span class="lbl">Saldo restante</span><span class="val" id="recTotSaldo">R$ 0,00</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Histórico de comprovantes <span class="desc-badge" id="recHistCount">0</span></h2>
+    <div id="recHistWrap"><div class="empty">Nenhum comprovante salvo ainda</div></div>
+  </div>
+
+</main>
+
+<footer class="bar" id="barRec" hidden>
+  <button id="btnRecNovo">Limpar</button>
+  <button id="btnRecPdf">Gerar comprovante</button>
 </footer>
 
 <div class="toast" id="toast"></div>
