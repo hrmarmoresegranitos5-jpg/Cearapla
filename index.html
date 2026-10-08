@@ -2,9 +2,9 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<meta name="theme-color" content="#0b0d10">
-<title>Ceará Planejados · Orçamentos</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#111111">
+<title>Ceará Planejados</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
 <link rel="icon" href="icon-192.png?v=2">
@@ -13,166 +13,245 @@
 <body>
 
 <header class="top">
-  <img src="icon-192.png?v=2" alt="Ceará Planejados">
-  <div class="titles">
-    <h1>Ceará Planejados</h1>
-    <span>Orçamentos em PDF</span>
-  </div>
+  <button type="button" id="btnBack" class="back" hidden>‹ Início</button>
+  <img src="icon-192.png?v=2" alt="">
+  <h1 id="topTitle">Ceará Planejados</h1>
 </header>
 
-<nav class="tabs" id="tabs">
-  <button type="button" class="tab active" data-view="orc">Orçamento</button>
-  <button type="button" class="tab" data-view="rec">Comprovante</button>
-</nav>
+<datalist id="cliList"></datalist>
 
-<main id="viewOrc">
+<main>
 
-  <div class="card" id="pdfCard" style="display:none;border-color:var(--gold);">
-    <h2>PDF pronto</h2>
-    <a id="pdfLink" href="#">⬇️ Baixar orçamento em PDF</a>
-    <p>Se o navegador abrir o PDF em vez de baixar, use o menu do navegador (⋮) → "Baixar página" ou toque e segure o botão acima.</p>
-    <button type="button" class="ghost-btn" id="btnRecDoOrc">Criar comprovante deste orçamento</button>
+<!-- ===================== INÍCIO ===================== -->
+<section id="scr-home">
+  <p class="lead">O que você quer fazer?</p>
+  <button type="button" class="homebtn gold" data-go="orc">
+    <span class="ico">📝</span>
+    <span><b>Fazer um orçamento</b><small>Para um cliente novo</small></span>
+  </button>
+  <button type="button" class="homebtn gold" data-go="rec">
+    <span class="ico">🧾</span>
+    <span><b>Fazer um comprovante</b><small>Quando o cliente pagar</small></span>
+  </button>
+  <button type="button" class="homebtn" data-go="hist">
+    <span class="ico">📂</span>
+    <span><b>Ver o que já fiz</b><small>Orçamentos e comprovantes antigos</small></span>
+  </button>
+  <button type="button" class="homebtn" data-go="abertos">
+    <span class="ico">💰</span>
+    <span><b>Quanto falta receber</b><small id="homeAbertosTxt">—</small></span>
+  </button>
+  <button type="button" class="banner warnbox" id="bkBanner" data-go="mais" hidden>
+    💾 Faça uma cópia de segurança dos seus dados. Toque aqui.
+  </button>
+  <button type="button" class="link center" data-go="mais">⚙️ Mais opções</button>
+</section>
+
+<!-- ===================== ORÇAMENTO ===================== -->
+<section id="scr-orc" hidden>
+  <div class="wiz-head">
+    <div class="prog"><i id="orcProgBar"></i></div>
+    <div class="passo" id="orcPasso"></div>
+    <h2 id="orcTitulo"></h2>
+    <div class="banner" id="orcAviso" hidden></div>
   </div>
 
-  <div class="card">
-    <h2>Cliente</h2>
-    <label>Nome do cliente</label>
-    <input type="text" id="cliNome" placeholder="Nome completo">
-    <div class="row2">
-      <div>
-        <label>WhatsApp / Telefone</label>
-        <input type="tel" id="cliTel" placeholder="(74) 9....">
-      </div>
-      <div>
-        <label>Validade (dias)</label>
-        <input type="number" id="validade" value="7" min="1">
-      </div>
+  <div class="step" id="orcStep1">
+    <div class="card">
+      <label for="cliNome">Nome do cliente</label>
+      <input type="text" id="cliNome" placeholder="Escreva o nome completo" list="cliList" autocomplete="off">
+      <label for="cliTel">Telefone ou WhatsApp <span class="opt">(com DDD)</span></label>
+      <input type="tel" id="cliTel" placeholder="Ex: (74) 99999-9999">
     </div>
   </div>
 
-  <div class="card">
-    <h2>Itens do orçamento</h2>
+  <div class="step" id="orcStep2" hidden>
+    <div class="card" id="modeloBox" hidden>
+      <label for="modeloSel">Usar um item que você já guardou</label>
+      <select id="modeloSel"></select>
+      <button type="button" class="big" id="btnModeloUsar">Colocar na lista</button>
+    </div>
     <div id="itensWrap"></div>
-    <button type="button" class="add-item" id="btnAddItem">+ Adicionar item</button>
+    <button type="button" class="big dashed" id="btnAddItem">➕ Adicionar outro item</button>
   </div>
 
-  <div class="card">
-    <h2>Desconto à vista</h2>
-    <label>Desconto para pagamento à vista (%)</label>
-    <input type="number" id="descontoPct" value="10" min="0" max="100" step="0.5">
-    <div style="margin-top:14px;">
-      <div class="totals-line"><span class="lbl">Total (parcelado)</span><span class="val" id="totBruto">R$ 0,00</span></div>
-      <div class="totals-line"><span class="lbl">Desconto</span><span class="val" id="totDesc">- R$ 0,00</span></div>
-      <div class="totals-line big"><span class="lbl">Total à vista</span><span class="val" id="totLiquido">R$ 0,00</span></div>
+  <div class="step" id="orcStep3" hidden>
+    <div class="card">
+      <label for="descontoPct">Desconto para pagar à vista (%)</label>
+      <input type="number" id="descontoPct" value="10" min="0" max="100" step="0.5" inputmode="decimal">
+      <div class="totals">
+        <div class="trow"><span>Valor total</span><b id="totBruto">R$ 0,00</b></div>
+        <div class="trow"><span>Desconto</span><b id="totDesc">- R$ 0,00</b></div>
+        <div class="trow big"><span>Total à vista</span><b id="totLiquido">R$ 0,00</b></div>
+      </div>
+    </div>
+    <div class="card">
+      <label for="validade">Quantos dias vale este orçamento?</label>
+      <input type="number" id="validade" value="7" min="1" inputmode="numeric">
+    </div>
+    <details class="card">
+      <summary>Outras informações <span class="opt">(se quiser)</span></summary>
+      <label for="condPagto">Como o cliente vai pagar?</label>
+      <input type="text" id="condPagto" placeholder="Ex: metade na entrada e metade na entrega">
+      <label for="condPrazo">Prazo de entrega</label>
+      <input type="text" id="condPrazo" placeholder="Ex: 45 dias úteis">
+      <label for="condGarantia">Garantia</label>
+      <input type="text" id="condGarantia" placeholder="Ex: 1 ano">
+    </details>
+  </div>
+
+  <div class="step" id="orcStep4" hidden>
+    <p class="hint">Confira se está tudo certo. Se não estiver, toque em "Voltar".</p>
+    <div class="card" id="resumoOrc"></div>
+  </div>
+
+  <div class="step" id="orcStep5" hidden>
+    <div class="card done">
+      <div class="done-ico">✅</div>
+      <h3 id="orcDoneTxt">Orçamento pronto!</h3>
+      <a id="pdfLink" href="#" class="big primary linkbtn">📄 Abrir o PDF</a>
+      <button type="button" class="big" id="btnShareOrc">💬 Enviar pelo WhatsApp</button>
+      <button type="button" class="big" id="btnRecDoOrc">🧾 Fazer comprovante deste orçamento</button>
+      <button type="button" class="big" id="btnDoneHomeOrc">🏠 Voltar ao início</button>
+      <p class="hint">Se o PDF não abrir sozinho, toque em "Abrir o PDF".</p>
     </div>
   </div>
+</section>
 
-  <div class="card">
-    <h2>Histórico de orçamentos <span class="desc-badge" id="histCount">0</span></h2>
-    <div id="histWrap"><div class="empty">Nenhum orçamento salvo ainda</div></div>
+<!-- ===================== COMPROVANTE ===================== -->
+<section id="scr-rec" hidden>
+  <div class="wiz-head">
+    <div class="prog"><i id="recProgBar"></i></div>
+    <div class="passo" id="recPasso"></div>
+    <h2 id="recTitulo"></h2>
   </div>
+
+  <div class="step" id="recStep1">
+    <div class="card">
+      <label for="recCliente">Nome do cliente</label>
+      <input type="text" id="recCliente" placeholder="Escreva o nome completo" list="cliList" autocomplete="off">
+      <label for="recServico">Qual foi o serviço?</label>
+      <input type="text" id="recServico" placeholder="Ex: Cozinha planejada">
+    </div>
+    <details class="card">
+      <summary>Tem número de orçamento? <span class="opt">(se quiser)</span></summary>
+      <label for="recOrc">Número do orçamento</label>
+      <input type="text" id="recOrc" inputmode="numeric" placeholder="Ex: 0001">
+    </details>
+  </div>
+
+  <div class="step" id="recStep2" hidden>
+    <p class="hint" id="recOrigem" hidden></p>
+    <div class="card">
+      <label for="recTotal">Valor total do serviço (R$)</label>
+      <input type="text" id="recTotal" class="money" inputmode="decimal" placeholder="Ex: 12000">
+      <label for="recValor">Quanto o cliente está pagando agora? (R$)</label>
+      <input type="text" id="recValor" class="money" inputmode="decimal" placeholder="Ex: 6000">
+      <label for="recForma">Como pagou?</label>
+      <select id="recForma">
+        <option>Dinheiro</option>
+        <option>Pix</option>
+        <option>Cartão de crédito</option>
+        <option>Cartão de débito</option>
+        <option>Transferência</option>
+        <option>Boleto</option>
+        <option>Cheque</option>
+      </select>
+      <label for="recData">Data do pagamento</label>
+      <input type="date" id="recData">
+      <div class="totals">
+        <div class="trow"><span>Total do serviço</span><b id="recTotTotal">R$ 0,00</b></div>
+        <div class="trow"><span>Já pago (com este)</span><b id="recTotPago">R$ 0,00</b></div>
+        <div class="trow big"><span>Falta pagar</span><b id="recTotSaldo">R$ 0,00</b></div>
+      </div>
+    </div>
+    <details class="card">
+      <summary>Mais opções <span class="opt">(se precisar)</span></summary>
+      <label for="recTipo">Tipo de pagamento</label>
+      <select id="recTipo">
+        <option>Entrada (aceito)</option>
+        <option>Parcela</option>
+        <option>Pagamento final</option>
+      </select>
+      <label for="recAnterior">Já pagou antes? Quanto? (R$)</label>
+      <input type="text" id="recAnterior" class="money" inputmode="decimal" placeholder="Deixe vazio se não pagou">
+      <label for="recObs">Aviso sobre o que falta pagar</label>
+      <input type="text" id="recObs" value="A ser pago na entrega e instalação do serviço">
+    </details>
+  </div>
+
+  <div class="step" id="recStep3" hidden>
+    <p class="hint">Confira se está tudo certo. Se não estiver, toque em "Voltar".</p>
+    <div class="card" id="resumoRec"></div>
+  </div>
+
+  <div class="step" id="recStep4" hidden>
+    <div class="card done">
+      <div class="done-ico">✅</div>
+      <h3 id="recDoneTxt">Comprovante pronto!</h3>
+      <a id="recPdfLink" href="#" class="big primary linkbtn">📄 Abrir o PDF</a>
+      <button type="button" class="big" id="btnShareRec">💬 Enviar pelo WhatsApp</button>
+      <button type="button" class="big" id="btnDoneHomeRec">🏠 Voltar ao início</button>
+      <p class="hint">Se o PDF não abrir sozinho, toque em "Abrir o PDF".</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== JÁ FIZ ===================== -->
+<section id="scr-hist" hidden>
+  <div class="tabs2">
+    <button type="button" id="tabOrc" class="on">Orçamentos</button>
+    <button type="button" id="tabRec">Comprovantes</button>
+  </div>
+  <input type="search" id="histBusca" placeholder="🔍 Procurar pelo nome do cliente" autocomplete="off">
+  <div id="histWrap"></div>
+  <div id="recHistWrap" hidden></div>
+</section>
+
+<!-- ===================== FALTA RECEBER ===================== -->
+<section id="scr-abertos" hidden>
+  <div class="card center">
+    <div class="passo">Total que falta receber</div>
+    <div class="bigvalue" id="abertosTotal">R$ 0,00</div>
+  </div>
+  <div id="abertosWrap"></div>
+</section>
+
+<!-- ===================== MAIS OPÇÕES ===================== -->
+<section id="scr-mais" hidden>
+  <div class="card">
+    <h2>Cópia de segurança</h2>
+    <p class="hint">Seus orçamentos e comprovantes ficam guardados só neste celular. Guarde uma cópia de vez em quando, para não perder nada.</p>
+    <button type="button" class="big primary" id="btnExport">💾 Guardar cópia agora</button>
+    <button type="button" class="big" id="btnImport">📥 Recuperar uma cópia guardada</button>
+    <input type="file" id="fileImport" accept=".json,application/json" hidden>
+  </div>
+  <div class="card">
+    <h2>Itens que você guardou</h2>
+    <div id="modelosLista"></div>
+  </div>
+</section>
 
 </main>
 
-<footer class="bar" id="barOrc">
-  <button id="btnNovo">Limpar</button>
-  <button id="btnPdf">Gerar PDF</button>
-</footer>
-
-<main id="viewRec" hidden>
-
-  <div class="card" id="recPdfCard" style="display:none;border-color:var(--gold);">
-    <h2>Comprovante pronto</h2>
-    <a id="recPdfLink" href="#">⬇️ Baixar comprovante em PDF</a>
-    <p>Se o navegador abrir o PDF em vez de baixar, use o menu do navegador (⋮) → "Baixar página" ou toque e segure o botão acima.</p>
-  </div>
-
-  <div class="card">
-    <h2>Pagamento recebido</h2>
-    <p class="hint" id="recOrigem">Comprovante avulso: preencha os dados manualmente. Para partir de um orçamento, toque em "Comprovante" no histórico.</p>
-
-    <label>Nome do cliente</label>
-    <input type="text" id="recCliente" placeholder="Nome completo">
-
-    <div class="row2">
-      <div>
-        <label>Serviço</label>
-        <input type="text" id="recServico" placeholder="Ex: Cozinha planejada">
-      </div>
-      <div>
-        <label>Nº do orçamento</label>
-        <input type="text" id="recOrc" inputmode="numeric" placeholder="Opcional">
-      </div>
-    </div>
-
-    <div class="row2">
-      <div>
-        <label>Tipo</label>
-        <select id="recTipo">
-          <option>Entrada (aceito)</option>
-          <option>Parcela</option>
-          <option>Pagamento final</option>
-        </select>
-      </div>
-      <div>
-        <label>Forma de pagamento</label>
-        <select id="recForma">
-          <option>Dinheiro</option>
-          <option>Pix</option>
-          <option>Cartão de crédito</option>
-          <option>Cartão de débito</option>
-          <option>Transferência</option>
-          <option>Boleto</option>
-          <option>Cheque</option>
-        </select>
-      </div>
-    </div>
-
-    <label>Data do lançamento</label>
-    <input type="date" id="recData">
-  </div>
-
-  <div class="card">
-    <h2>Valores</h2>
-    <div class="row2">
-      <div>
-        <label>Valor total do serviço (R$)</label>
-        <input type="text" id="recTotal" inputmode="decimal" placeholder="0,00">
-      </div>
-      <div>
-        <label>Valor deste lançamento (R$)</label>
-        <input type="text" id="recValor" inputmode="decimal" placeholder="0,00">
-      </div>
-    </div>
-    <label>Já pago antes (R$) <span class="opt">opcional</span></label>
-    <input type="text" id="recAnterior" inputmode="decimal" placeholder="0,00">
-    <label>Aviso sobre o saldo</label>
-    <input type="text" id="recObs" value="A ser pago na entrega e instalação do serviço">
-
-    <div style="margin-top:14px;">
-      <div class="totals-line"><span class="lbl">Total do serviço</span><span class="val" id="recTotTotal">R$ 0,00</span></div>
-      <div class="totals-line"><span class="lbl">Pago antes + este lançamento</span><span class="val" id="recTotPago">R$ 0,00</span></div>
-      <div class="totals-line big"><span class="lbl">Saldo restante</span><span class="val" id="recTotSaldo">R$ 0,00</span></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Histórico de comprovantes <span class="desc-badge" id="recHistCount">0</span></h2>
-    <div id="recHistWrap"><div class="empty">Nenhum comprovante salvo ainda</div></div>
-  </div>
-
-</main>
-
-<footer class="bar" id="barRec" hidden>
-  <button id="btnRecNovo">Limpar</button>
-  <button id="btnRecPdf">Gerar comprovante</button>
+<footer class="bar" id="bar" hidden>
+  <button type="button" class="big" id="btnPrev">‹ Voltar</button>
+  <button type="button" class="big primary" id="btnNext">Continuar ›</button>
 </footer>
 
 <div class="toast" id="toast"></div>
 
+<div class="modal" id="modal" hidden>
+  <div class="mbox">
+    <h3 id="mTitulo"></h3>
+    <p id="mTexto"></p>
+    <input type="text" id="mInput" hidden>
+    <div id="mBtns"></div>
+  </div>
+</div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
-
 <script>
   if('serviceWorker' in navigator){
     window.addEventListener('load', function(){

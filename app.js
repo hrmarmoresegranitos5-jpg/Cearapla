@@ -1,7 +1,7 @@
 (function(){
   "use strict";
 
-  var LOGO_B64 = null; // carregado dinamicamente de icons/logo.png
+  var LOGO_B64 = null;
   var logoPromise = null;
   var EMPRESA = {
     nome: "Ceará Planejados",
@@ -11,25 +11,37 @@
     cnpj: "" // preencha aqui o CNPJ (ex: "00.000.000/0001-00"); se ficar vazio, não aparece no comprovante
   };
 
-  var LS_KEY = "cp_orcamentos_v1";
-  var itemSeq = 0;
-  var ultimoOrc = null;
+  var LS_KEY  = "cp_orcamentos_v1";
+  var REC_KEY = "cp_comprovantes_v1";
+  var MOD_KEY = "cp_modelos_v1";
+  var BK_KEY  = "cp_backup_ultimo";
+  var REC_OBS_PADRAO = "A ser pago na entrega e instalação do serviço";
+  var MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 
+  var itemSeq = 0, ultimoOrc = null, editando = null;
+  var orcFeito = false, recFeito = false, orcStep = 1, recStep = 1;
+  var screen = 'home', histTab = 'orc', recAntTocado = false;
+  var lastOrcFile = null, lastOrcTel = '', lastOrcMsg = '';
+  var lastRecFile = null, lastRecTel = '', lastRecMsg = '';
+  var clientesTel = {};
+
+  function $(id){ return document.getElementById(id); }
+  function pad4(n){ return String(n).padStart(4,'0'); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function fmtBRL(v){
     return "R$ " + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   }
+  // aceita "13400", "13.400", "13.400,50", "13400,5"
   function parseNum(str){
     if(!str) return 0;
-    str = String(str).replace(/[^\d,.-]/g,'').replace(/\.(?=\d{3},)/g,'').replace(',', '.');
-    var n = parseFloat(str);
+    var s = String(str).replace(/[^\d,.]/g,'');
+    if(!s) return 0;
+    if(s.indexOf(',') >= 0){ s = s.replace(/\./g,'').replace(',','.'); }
+    else if(/^\d{1,3}(\.\d{3})+$/.test(s)){ s = s.replace(/\./g,''); }
+    var n = parseFloat(s);
     return isNaN(n) ? 0 : n;
   }
-  function toast(msg){
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    setTimeout(function(){ t.classList.remove('show'); }, 2200);
-  }
+  function numParaCampo(v){ return (Math.round(v*100)/100).toFixed(2).replace('.',','); }
   function todayISO(){
     var d = new Date();
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -38,125 +50,363 @@
     var d = new Date();
     return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
   }
+  function isoParaBR(iso){
+    var p = String(iso||'').split('-');
+    return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso;
+  }
+  function isoPorExtenso(iso){
+    var p = String(iso||'').split('-');
+    if(p.length!==3) return iso;
+    return p[2]+' de '+MESES[parseInt(p[1],10)-1]+' de '+p[0];
+  }
+  function slug(s){
+    return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+  }
+  function primeiraLinha(s){
+    var l = String(s||'').split('\n')[0].trim();
+    return l.length > 60 ? l.slice(0,60).trim() + '...' : l;
+  }
 
-  // ---------- ITENS ----------
+  var toastT = null;
+  function toast(msg, warn){
+    var t = $('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (warn ? ' warn' : '');
+    clearTimeout(toastT);
+    toastT = setTimeout(function(){ t.className = 'toast'; }, warn ? 4500 : 3200);
+  }
+  function aviso(msg, el){ toast(msg, true); if(el){ try{ el.focus(); }catch(e){} } }
+
+  // janela de pergunta com botões grandes
+  function modal(o){
+    return new Promise(function(resolve){
+      $('mTitulo').textContent = o.titulo || '';
+      $('mTexto').textContent = o.texto || '';
+      var inp = $('mInput');
+      inp.hidden = !o.input;
+      inp.value = o.valor || '';
+      var box = $('mBtns');
+      box.innerHTML = '';
+      o.buttons.forEach(function(b){
+        var bt = document.createElement('button');
+        bt.type = 'button';
+        bt.className = 'big ' + (b.kind || '');
+        bt.textContent = b.label;
+        bt.addEventListener('click', function(){
+          $('modal').hidden = true;
+          resolve(o.input ? {v:b.value, texto:inp.value} : b.value);
+        });
+        box.appendChild(bt);
+      });
+      $('modal').hidden = false;
+      if(o.input) setTimeout(function(){ inp.focus(); }, 50);
+    });
+  }
+  function confirmar(titulo, texto, okLabel, perigo){
+    return modal({titulo:titulo, texto:texto, buttons:[
+      {label:okLabel, value:true, kind: perigo ? 'danger' : 'primary'},
+      {label:'Não, voltar', value:false}
+    ]});
+  }
+
+  // ---------- armazenamento ----------
+  function lerLS(k){ try{ return JSON.parse(localStorage.getItem(k)) || []; }catch(e){ return []; } }
+  function getHistorico(){ return lerLS(LS_KEY); }
+  function saveHistorico(l){ localStorage.setItem(LS_KEY, JSON.stringify(l)); }
+  function getRecs(){ return lerLS(REC_KEY); }
+  function saveRecs(l){ localStorage.setItem(REC_KEY, JSON.stringify(l)); }
+  function getModelos(){ return lerLS(MOD_KEY); }
+  function saveModelos(l){ localStorage.setItem(MOD_KEY, JSON.stringify(l)); }
+  function nextNumero(list){
+    return list.length ? Math.max.apply(null, list.map(function(o){ return o.numero||0; })) + 1 : 1;
+  }
+
+  // mostra "= R$ 13.400,00" embaixo dos campos de valor
+  function refreshPreviews(){
+    Array.prototype.forEach.call(document.querySelectorAll('.money'), function(i){
+      var p = i.nextSibling;
+      if(p && p.className === 'preview'){
+        var v = parseNum(i.value);
+        p.textContent = v ? '= ' + fmtBRL(v) : '';
+      }
+    });
+  }
+  function bindMoney(inp){
+    var p = document.createElement('div');
+    p.className = 'preview';
+    inp.parentNode.insertBefore(p, inp.nextSibling);
+    inp.addEventListener('input', refreshPreviews);
+  }
+
+
+  // =====================================================================
+  // NAVEGAÇÃO
+  // =====================================================================
+  var TITULOS = {home:'Ceará Planejados', orc:'Fazer orçamento', rec:'Fazer comprovante', hist:'O que já fiz', abertos:'Quanto falta receber', mais:'Mais opções'};
+  var TELAS = ['home','orc','rec','hist','abertos','mais'];
+
+  function show(name, noPush){
+    screen = name;
+    TELAS.forEach(function(s){ $('scr-'+s).hidden = (s !== name); });
+    $('btnBack').hidden = (name === 'home');
+    $('topTitle').textContent = TITULOS[name];
+    if(name === 'home') renderHome();
+    if(name === 'hist') renderHist();
+    if(name === 'abertos') renderAbertos();
+    if(name === 'mais') renderModelosLista();
+    updateBar();
+    window.scrollTo(0,0);
+    if(!noPush){ try{ history.pushState({s:name}, ''); }catch(e){} }
+  }
+  window.addEventListener('popstate', function(e){
+    show((e.state && e.state.s) || 'home', true);
+  });
+  function updateBar(){
+    var mostrar = false;
+    if(screen === 'orc' && orcStep <= 4){
+      mostrar = true;
+      $('btnPrev').textContent = orcStep === 1 ? '‹ Início' : '‹ Voltar';
+      $('btnNext').textContent = orcStep === 4 ? '✔ Gerar PDF' : 'Continuar ›';
+    } else if(screen === 'rec' && recStep <= 3){
+      mostrar = true;
+      $('btnPrev').textContent = recStep === 1 ? '‹ Início' : '‹ Voltar';
+      $('btnNext').textContent = recStep === 3 ? '✔ Gerar comprovante' : 'Continuar ›';
+    }
+    $('bar').hidden = !mostrar;
+    document.body.classList.toggle('has-bar', mostrar);
+  }
+
+  // =====================================================================
+  // ORÇAMENTO (passo a passo)
+  // =====================================================================
+  var ORC_TIT = ['', 'Quem é o cliente?', 'O que vai no orçamento?', 'Valores e prazos', 'Confira e gere o PDF', 'Orçamento pronto!'];
+
+  function goOrc(n){
+    orcStep = n;
+    for(var i=1;i<=5;i++) $('orcStep'+i).hidden = (i !== n);
+    $('orcPasso').textContent = n <= 4 ? 'Passo ' + n + ' de 4' : '';
+    $('orcProgBar').style.width = (n >= 5 ? 100 : n*25) + '%';
+    $('orcTitulo').textContent = ORC_TIT[n];
+    if(n === 3) calcTotals();
+    if(n === 4) renderResumoOrc();
+    updateBar();
+    window.scrollTo(0,0);
+  }
+
   function addItem(desc, valor){
     itemSeq++;
-    var id = 'it'+itemSeq;
-    var wrap = document.getElementById('itensWrap');
+    var wrap = $('itensWrap');
     var div = document.createElement('div');
-    div.className = 'item';
-    div.id = id;
+    div.className = 'card item';
     div.innerHTML =
-      '<div class="item-top"><span>Item '+ (wrap.children.length+1) +'</span>'+
-      '<button type="button" class="rm">remover</button></div>'+
-      '<label>Descrição detalhada</label>'+
-      '<textarea class="it-desc" placeholder="Ex: Guarda-roupa 6 portas, MDF branco TX, com espelho na porta central, puxadores em alumínio escovado, medindo 2,40m x 2,10m...">'+(desc||'')+'</textarea>'+
+      '<div class="item-top"><b class="item-num">Item '+(wrap.children.length+1)+'</b>'+
+      '<button type="button" class="link danger rm">✖ Tirar este item</button></div>'+
+      '<label>O que é? Descreva o móvel</label>'+
+      '<textarea class="it-desc" placeholder="Ex: Guarda-roupa 6 portas, MDF branco, com espelho na porta do meio..."></textarea>'+
       '<label>Valor (R$)</label>'+
-      '<input type="text" class="it-valor" inputmode="decimal" placeholder="0,00" value="'+(valor!=null? String(valor).replace('.',',') : '')+'">';
+      '<input type="text" class="it-valor money" inputmode="decimal" placeholder="Ex: 3500">'+
+      '<button type="button" class="link it-save">💾 Guardar este item para usar de novo</button>';
     wrap.appendChild(div);
+    div.querySelector('.it-desc').value = desc || '';
+    div.querySelector('.it-valor').value = valor ? numParaCampo(valor) : '';
+    bindMoney(div.querySelector('.it-valor'));
     div.querySelector('.rm').addEventListener('click', function(){
-      div.remove();
-      renumberItems();
+      if(wrap.children.length === 1){
+        div.querySelector('.it-desc').value = '';
+        div.querySelector('.it-valor').value = '';
+      } else { div.remove(); renumberItems(); }
       calcTotals();
     });
+    div.querySelector('.it-save').addEventListener('click', function(){ salvarModelo(div); });
     div.querySelector('.it-valor').addEventListener('input', calcTotals);
     calcTotals();
   }
   function renumberItems(){
-    var wrap = document.getElementById('itensWrap');
-    Array.prototype.forEach.call(wrap.children, function(div, i){
-      div.querySelector('.item-top span').textContent = 'Item ' + (i+1);
+    Array.prototype.forEach.call($('itensWrap').children, function(div, i){
+      div.querySelector('.item-num').textContent = 'Item ' + (i+1);
     });
   }
   function getItens(){
-    var wrap = document.getElementById('itensWrap');
     var out = [];
-    Array.prototype.forEach.call(wrap.children, function(div){
+    Array.prototype.forEach.call($('itensWrap').children, function(div){
       var desc = div.querySelector('.it-desc').value.trim();
       var valor = parseNum(div.querySelector('.it-valor').value);
       if(desc || valor) out.push({desc:desc, valor:valor});
     });
     return out;
   }
-
   function calcTotals(){
-    var itens = getItens();
-    var bruto = itens.reduce(function(s,i){ return s + i.valor; }, 0);
-    var pct = parseFloat(document.getElementById('descontoPct').value) || 0;
+    var bruto = getItens().reduce(function(s,i){ return s + i.valor; }, 0);
+    var pct = parseFloat($('descontoPct').value) || 0;
     var desc = bruto * (pct/100);
     var liquido = bruto - desc;
-    document.getElementById('totBruto').textContent = fmtBRL(bruto);
-    document.getElementById('totDesc').textContent = '- ' + fmtBRL(desc);
-    document.getElementById('totLiquido').textContent = fmtBRL(liquido);
+    $('totBruto').textContent = fmtBRL(bruto);
+    $('totDesc').textContent = '- ' + fmtBRL(desc);
+    $('totLiquido').textContent = fmtBRL(liquido);
+    refreshPreviews();
     return {bruto:bruto, desc:desc, liquido:liquido, pct:pct};
   }
-
-  document.getElementById('btnAddItem').addEventListener('click', function(){ addItem(); });
-  document.getElementById('descontoPct').addEventListener('input', calcTotals);
-
-  // ---------- LIMPAR ----------
-  document.getElementById('btnNovo').addEventListener('click', function(){
-    if(!confirm('Limpar todos os campos do orçamento atual?')) return;
-    document.getElementById('cliNome').value = '';
-    document.getElementById('cliTel').value = '';
-    document.getElementById('validade').value = 7;
-    document.getElementById('descontoPct').value = 10;
-    document.getElementById('itensWrap').innerHTML = '';
-    document.getElementById('pdfCard').style.display = 'none';
+  $('btnAddItem').addEventListener('click', function(){
     addItem();
-    calcTotals();
+    var itens = $('itensWrap').children;
+    itens[itens.length-1].querySelector('.it-desc').focus();
   });
+  $('descontoPct').addEventListener('input', calcTotals);
 
-  // ---------- HISTÓRICO ----------
-  function getHistorico(){
-    try{ return JSON.parse(localStorage.getItem(LS_KEY)) || []; }
-    catch(e){ return []; }
+  function novoOrc(){
+    ['cliNome','cliTel','condPagto','condPrazo','condGarantia'].forEach(function(id){ $(id).value = ''; });
+    $('validade').value = 7;
+    $('descontoPct').value = 10;
+    $('itensWrap').innerHTML = '';
+    editando = null; orcFeito = false;
+    $('orcAviso').hidden = true;
+    addItem();
+    goOrc(1);
   }
-  function saveHistorico(list){
-    localStorage.setItem(LS_KEY, JSON.stringify(list));
+  function hasDraftOrc(){
+    return !orcFeito && ($('cliNome').value.trim() || getItens().length > 0);
   }
-  function nextNumero(list){
-    var n = list.length ? Math.max.apply(null, list.map(function(o){return o.numero||0;})) + 1 : 1;
-    return n;
+  function iniciarOrc(){
+    if(!hasDraftOrc()){ novoOrc(); show('orc'); return; }
+    modal({titulo:'Você já começou um orçamento', texto:'O que deseja fazer?', buttons:[
+      {label:'▶ Continuar de onde parei', value:'c', kind:'primary'},
+      {label:'🆕 Começar um novo do zero', value:'n'}
+    ]}).then(function(v){
+      if(v === 'c') show('orc');
+      else { novoOrc(); show('orc'); }
+    });
   }
-  function renderHistorico(){
-    var list = getHistorico().slice().reverse();
-    var wrap = document.getElementById('histWrap');
-    document.getElementById('histCount').textContent = list.length;
-    if(!list.length){
-      wrap.innerHTML = '<div class="empty">Nenhum orçamento salvo ainda</div>';
+  function carregarOrc(o, dup){
+    novoOrc();
+    $('cliNome').value = dup ? '' : (o.cliente || '');
+    $('cliTel').value = dup ? '' : (o.telefone || '');
+    $('validade').value = o.validadeDias || 7;
+    $('descontoPct').value = (o.pct != null ? o.pct : 10);
+    $('condPagto').value = o.pagto || '';
+    $('condPrazo').value = o.prazo || '';
+    $('condGarantia').value = o.garantia || '';
+    $('itensWrap').innerHTML = '';
+    (o.itens || []).forEach(function(i){ addItem(i.desc, i.valor); });
+    if(!(o.itens || []).length) addItem();
+    editando = dup ? null : o.numero;
+    var av = $('orcAviso');
+    av.textContent = dup
+      ? 'Cópia do orçamento nº ' + pad4(o.numero) + '. Escreva o nome do novo cliente.'
+      : 'Você está corrigindo o orçamento nº ' + pad4(o.numero) + '. Ao gerar o PDF, ele será atualizado (o número continua o mesmo).';
+    av.hidden = false;
+    calcTotals();
+    show('orc');
+    goOrc(1);
+  }
+  function editarOrc(o, dup){
+    if(!hasDraftOrc()){ carregarOrc(o, dup); return; }
+    confirmar('Descartar o orçamento em andamento?', 'Você tem um orçamento começado. Se continuar, ele será apagado.', 'Sim, descartar e abrir', true)
+      .then(function(ok){ if(ok) carregarOrc(o, dup); });
+  }
+
+  function orcPrev(){
+    if(orcStep === 1) show('home'); else goOrc(orcStep - 1);
+  }
+  function orcNext(){
+    if(orcStep === 1){
+      if(!$('cliNome').value.trim()){ aviso('Escreva o nome do cliente para continuar.', $('cliNome')); return; }
+      goOrc(2);
+    } else if(orcStep === 2){
+      var itens = getItens();
+      if(!itens.length){ aviso('Descreva o móvel e coloque o valor para continuar.'); return; }
+      for(var i=0;i<itens.length;i++){
+        if(!itens[i].desc){ aviso('O item ' + (i+1) + ' está sem descrição.'); return; }
+        if(!itens[i].valor){ aviso('O item ' + (i+1) + ' está sem valor.'); return; }
+      }
+      goOrc(3);
+    } else if(orcStep === 3){
+      goOrc(4);
+    } else if(orcStep === 4){
+      gerarPDF();
+    }
+  }
+
+  function renderResumoOrc(){
+    var itens = getItens(), t = calcTotals();
+    var tel = $('cliTel').value.trim();
+    var h = '<div class="sum-row"><span>Cliente</span><b>' + esc($('cliNome').value.trim()) + '</b></div>';
+    if(tel) h += '<div class="sum-row"><span>Telefone</span><b>' + esc(tel) + '</b></div>';
+    itens.forEach(function(i, k){
+      h += '<div class="sum-item"><span>' + (k+1) + '. ' + esc(primeiraLinha(i.desc) || 'Item') + '</span><b>' + fmtBRL(i.valor) + '</b></div>';
+    });
+    h += '<div class="sum-row"><span>Valor total</span><b>' + fmtBRL(t.bruto) + '</b></div>';
+    h += '<div class="sum-row"><span>Desconto à vista (' + t.pct + '%)</span><b>- ' + fmtBRL(t.desc) + '</b></div>';
+    [['Pagamento', $('condPagto').value], ['Prazo de entrega', $('condPrazo').value], ['Garantia', $('condGarantia').value]].forEach(function(p){
+      if(p[1].trim()) h += '<div class="sum-row"><span>' + p[0] + '</span><b>' + esc(p[1].trim()) + '</b></div>';
+    });
+    h += '<div class="sum-row"><span>Validade</span><b>' + (parseInt($('validade').value) || 7) + ' dias</b></div>';
+    h += '<div class="sum-total"><span>Total à vista</span><span>' + fmtBRL(t.liquido) + '</span></div>';
+    $('resumoOrc').innerHTML = h;
+  }
+
+  function salvarModelo(div){
+    var desc = div.querySelector('.it-desc').value.trim();
+    var valor = parseNum(div.querySelector('.it-valor').value);
+    if(!desc){ aviso('Descreva o móvel primeiro.'); return; }
+    modal({titulo:'Guardar este item', texto:'Dê um nome para encontrar depois.', input:true, valor: primeiraLinha(desc).slice(0,40), buttons:[
+      {label:'💾 Guardar', value:'ok', kind:'primary'},
+      {label:'Cancelar', value:'x'}
+    ]}).then(function(r){
+      if(r.v !== 'ok' || !r.texto.trim()) return;
+      var l = getModelos();
+      l.push({nome:r.texto.trim(), desc:desc, valor:valor});
+      saveModelos(l); renderModelos();
+      toast('Item guardado! Use em "Usar um item que você já guardou".');
+    });
+  }
+  function renderModelos(){
+    var l = getModelos(), sel = $('modeloSel');
+    $('modeloBox').hidden = !l.length;
+    sel.innerHTML = '<option value="">Escolha um item guardado...</option>';
+    l.forEach(function(m, i){
+      var op = document.createElement('option');
+      op.value = i;
+      op.textContent = m.nome + (m.valor ? ' - ' + fmtBRL(m.valor) : '');
+      sel.appendChild(op);
+    });
+  }
+  $('btnModeloUsar').addEventListener('click', function(){
+    var i = $('modeloSel').value;
+    var m = i === '' ? null : getModelos()[i];
+    if(!m){ aviso('Escolha um item da lista primeiro.'); return; }
+    if(!getItens().length) $('itensWrap').innerHTML = '';
+    addItem(m.desc, m.valor);
+    $('modeloSel').value = '';
+    toast('Item colocado na lista.');
+  });
+  function renderModelosLista(){
+    var l = getModelos(), wrap = $('modelosLista');
+    if(!l.length){
+      wrap.innerHTML = '<div class="empty">Você ainda não guardou nenhum item. Ao fazer um orçamento, toque em "Guardar este item para usar de novo".</div>';
       return;
     }
     wrap.innerHTML = '';
-    list.forEach(function(o){
+    l.forEach(function(m, i){
       var row = document.createElement('div');
-      row.className = 'hist';
-      row.innerHTML =
-        '<div><div class="h-name">#'+String(o.numero).padStart(4,'0')+' · '+(o.cliente||'Sem nome')+'</div>'+
-        '<div class="h-meta">'+o.dataBR+' · '+fmtBRL(o.liquido)+'</div></div>'+
-        '<div class="h-actions"><button type="button" class="b-reabrir">Reabrir</button>'+
-        '<button type="button" class="b-rec">Comprovante</button></div>';
-      row.querySelector('.b-reabrir').addEventListener('click', function(){ reabrirOrcamento(o); });
-      row.querySelector('.b-rec').addEventListener('click', function(){ abrirRecDoOrcamento(o); });
+      row.className = 'sum-row';
+      row.innerHTML = '<span><b style="color:var(--ink)">' + esc(m.nome) + '</b><br>' + (m.valor ? fmtBRL(m.valor) : '') + '</span>' +
+        '<button type="button" class="link danger">🗑️ Apagar</button>';
+      row.querySelector('button').addEventListener('click', function(){
+        confirmar('Apagar este item guardado?', m.nome, 'Sim, apagar', true).then(function(ok){
+          if(!ok) return;
+          var l2 = getModelos(); l2.splice(i, 1); saveModelos(l2);
+          renderModelos(); renderModelosLista();
+          toast('Item apagado.');
+        });
+      });
       wrap.appendChild(row);
     });
   }
-  function reabrirOrcamento(o){
-    document.getElementById('cliNome').value = o.cliente || '';
-    document.getElementById('cliTel').value = o.telefone || '';
-    document.getElementById('validade').value = o.validadeDias || 7;
-    document.getElementById('descontoPct').value = o.pct || 10;
-    document.getElementById('itensWrap').innerHTML = '';
-    (o.itens||[]).forEach(function(i){ addItem(i.desc, i.valor); });
-    if(!(o.itens||[]).length) addItem();
-    calcTotals();
-    window.scrollTo({top:0, behavior:'smooth'});
-    toast('Orçamento #' + String(o.numero).padStart(4,'0') + ' carregado');
-  }
 
+  // ---------- gerar PDF do orçamento ----------
   // ---------- MONTAR PDF (jsPDF) ----------
-  function montarDoc(numero, cliente, telefone, validadeDias, itens, t){
+  function montarDoc(numero, cliente, telefone, validadeDias, itens, t, extras){
+    extras = extras || {};
     var jsPDF = window.jspdf.jsPDF;
     var doc = new jsPDF({unit:'mm', format:'a4'});
     var pageW = 210, marginX = 16;
@@ -186,7 +436,7 @@
     doc.setFont('helvetica','normal');
     doc.setFontSize(11);
     doc.setTextColor(mutedRGB[0],mutedRGB[1],mutedRGB[2]);
-    doc.text('Data: ' + todayBR(), pageW-marginX, y+12, {align:'right'});
+    doc.text('Data: ' + (extras.dataBR || todayBR()), pageW-marginX, y+12, {align:'right'});
     doc.text('Válido por ' + validadeDias + ' dias', pageW-marginX, y+17.5, {align:'right'});
 
     y += 30;
@@ -288,7 +538,20 @@
     doc.setTextColor(goldRGB[0],goldRGB[1],goldRGB[2]);
     doc.text('TOTAL À VISTA', marginX, y+2);
     doc.text(fmtBRL(t.liquido), pageW-marginX, y+2, {align:'right'});
-    y += 18;
+    y += 14;
+    [['Condições de pagamento', extras.pagto], ['Prazo de entrega', extras.prazo], ['Garantia', extras.garantia]].forEach(function(p){
+      if(!p[1]) return;
+      doc.setFont('helvetica','normal'); doc.setFontSize(11.5);
+      var ls = doc.splitTextToSize(p[1], pageW - marginX*2 - 50);
+      if(y + ls.length*5.6 > 270){ doc.addPage(); y = 18; }
+      doc.setFont('helvetica','bold'); doc.setTextColor(darkRGB[0],darkRGB[1],darkRGB[2]);
+      doc.text(p[0] + ':', marginX, y);
+      doc.setFont('helvetica','normal');
+      ls.forEach(function(l, i){ doc.text(l, marginX + 50, y + i*5.6); });
+      y += ls.length*5.6 + 2;
+    });
+    y += 4;
+    if(y > 275){ doc.addPage(); y = 18; }
 
     doc.setFont('helvetica','italic');
     doc.setFontSize(10.5);
@@ -303,149 +566,89 @@
     return doc;
   }
 
-  // ---------- GERAR ----------
   function gerarPDF(){
-    var cliente = document.getElementById('cliNome').value.trim();
-    var telefone = document.getElementById('cliTel').value.trim();
-    var validadeDias = parseInt(document.getElementById('validade').value) || 7;
+    var cliente = $('cliNome').value.trim();
+    var telefone = $('cliTel').value.trim();
+    var validadeDias = parseInt($('validade').value) || 7;
     var itens = getItens();
-
-    if(!cliente){ toast('Informe o nome do cliente'); document.getElementById('cliNome').focus(); return; }
-    if(!itens.length){ toast('Adicione ao menos 1 item'); return; }
+    if(!cliente){ goOrc(1); aviso('Escreva o nome do cliente.', $('cliNome')); return; }
+    if(!itens.length){ goOrc(2); aviso('Coloque ao menos um item.'); return; }
 
     var t = calcTotals();
     var list = getHistorico();
-    var numero = nextNumero(list);
+    var idx = -1;
+    if(editando != null){
+      for(var i=0;i<list.length;i++){ if(list[i].numero === editando){ idx = i; break; } }
+    }
+    var numero = idx >= 0 ? editando : nextNumero(list);
+    var rec = {
+      numero: numero,
+      cliente: cliente,
+      telefone: telefone,
+      validadeDias: validadeDias,
+      pct: t.pct,
+      bruto: t.bruto,
+      desc: t.desc,
+      liquido: t.liquido,
+      itens: itens,
+      pagto: $('condPagto').value.trim(),
+      prazo: $('condPrazo').value.trim(),
+      garantia: $('condGarantia').value.trim(),
+      dataISO: idx >= 0 ? list[idx].dataISO : todayISO(),
+      dataBR: idx >= 0 ? list[idx].dataBR : todayBR()
+    };
+    if(idx >= 0) list[idx] = rec; else list.push(rec);
+    saveHistorico(list);
+    editando = null;
+    orcFeito = true;
+    entregarOrc(rec).then(function(){
+      toast('Pronto! Orçamento nº ' + pad4(numero) + ' gerado.');
+    });
+  }
 
-    Promise.resolve(logoPromise).then(function(){
-      var doc = montarDoc(numero, cliente, telefone, validadeDias, itens, t);
-      var fname = 'orcamento-' + String(numero).padStart(4,'0') + '-' + cliente.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') + '.pdf';
-
+  // gera o arquivo, baixa e mostra a tela "pronto"
+  function entregarOrc(o){
+    return Promise.resolve(logoPromise).then(function(){
+      var doc = montarDoc(o.numero, o.cliente, o.telefone || '', o.validadeDias || 7, o.itens || [],
+        {bruto:o.bruto, desc:o.desc, liquido:o.liquido, pct:o.pct},
+        {pagto:o.pagto, prazo:o.prazo, garantia:o.garantia, dataBR:o.dataBR});
+      var fname = 'orcamento-' + pad4(o.numero) + '-' + slug(o.cliente) + '.pdf';
       var blob = doc.output('blob');
       var url = URL.createObjectURL(blob);
-
-      // tenta baixar automaticamente (clique síncrono de âncora)
+      try{ lastOrcFile = new File([blob], fname, {type:'application/pdf'}); }catch(e){ lastOrcFile = null; }
+      lastOrcTel = o.telefone || '';
+      lastOrcMsg = 'Olá, ' + String(o.cliente).split(' ')[0] + '! Segue o orçamento nº ' + pad4(o.numero) + ' da ' + EMPRESA.nome + '.';
+      ultimoOrc = o;
       try{
         var a = document.createElement('a');
-        a.href = url;
-        a.download = fname;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        a.href = url; a.download = fname;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
       }catch(e){}
-
-      // sempre mostra também o botão manual
-      var pdfCard = document.getElementById('pdfCard');
-      var pdfLink = document.getElementById('pdfLink');
-      pdfLink.href = url;
-      pdfLink.setAttribute('download', fname);
-      pdfCard.style.display = 'block';
-      pdfCard.scrollIntoView({behavior:'smooth', block:'start'});
-
-      ultimoOrc = {
-        numero: numero, cliente: cliente, liquido: t.liquido, itens: itens
-      };
-      list.push({
-        numero: numero,
-        cliente: cliente,
-        telefone: telefone,
-        validadeDias: validadeDias,
-        pct: t.pct,
-        bruto: t.bruto,
-        desc: t.desc,
-        liquido: t.liquido,
-        itens: itens,
-        dataISO: todayISO(),
-        dataBR: todayBR()
-      });
-      saveHistorico(list);
-      renderHistorico();
-      toast('PDF gerado: orçamento #' + String(numero).padStart(4,'0'));
+      $('pdfLink').href = url;
+      $('pdfLink').setAttribute('download', fname);
+      $('orcDoneTxt').textContent = 'Orçamento nº ' + pad4(o.numero) + ' de ' + o.cliente + ' pronto!';
+      show('orc');
+      goOrc(5);
     });
   }
-
-  function carregarLogoBase64(){
-    return new Promise(function(resolve){
-      var img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = function(){
-        try{
-          var canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          canvas.getContext('2d').drawImage(img, 0, 0);
-          var dataUrl = canvas.toDataURL('image/png');
-          LOGO_B64 = dataUrl.split(',')[1];
-        }catch(e){ LOGO_B64 = null; }
-        resolve();
-      };
-      img.onerror = function(){ resolve(); };
-      img.src = 'icon-512.png?v=2';
-    });
-  }
-
-  document.getElementById('btnPdf').addEventListener('click', gerarPDF);
 
   // =====================================================================
-  // COMPROVANTE DE PAGAMENTO
+  // COMPROVANTE (passo a passo)
   // =====================================================================
-  var REC_KEY = "cp_comprovantes_v1";
-  var REC_OBS_PADRAO = "A ser pago na entrega e instalação do serviço";
-  var recAntTocado = false;
-  var recOrigemPadrao = document.getElementById('recOrigem').textContent;
+  var REC_TIT = ['', 'Quem pagou?', 'Quanto foi pago?', 'Confira e gere o comprovante', 'Comprovante pronto!'];
 
-  function $(id){ return document.getElementById(id); }
-  function pad4(n){ return String(n).padStart(4,'0'); }
-  function numParaCampo(v){ return (Math.round(v*100)/100).toFixed(2).replace('.',','); }
-  function isoParaBR(iso){
-    var p = String(iso||'').split('-');
-    return p.length===3 ? p[2]+'/'+p[1]+'/'+p[0] : iso;
-  }
-  var MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
-  function isoPorExtenso(iso){
-    var p = String(iso||'').split('-');
-    if(p.length!==3) return iso;
-    return p[2]+' de '+MESES[parseInt(p[1],10)-1]+' de '+p[0];
-  }
-  function esc(s){
-    return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  function goRec(n){
+    recStep = n;
+    for(var i=1;i<=4;i++) $('recStep'+i).hidden = (i !== n);
+    $('recPasso').textContent = n <= 3 ? 'Passo ' + n + ' de 3' : '';
+    $('recProgBar').style.width = (n >= 4 ? 100 : Math.round(n*100/3)) + '%';
+    $('recTitulo').textContent = REC_TIT[n];
+    if(n === 2) recCalc();
+    if(n === 3) renderResumoRec();
+    updateBar();
+    window.scrollTo(0,0);
   }
 
-  // ---------- abas ----------
-  function showView(v){
-    var rec = (v==='rec');
-    $('viewOrc').hidden = rec;
-    $('barOrc').hidden = rec;
-    $('viewRec').hidden = !rec;
-    $('barRec').hidden = !rec;
-    Array.prototype.forEach.call(document.querySelectorAll('#tabs .tab'), function(b){
-      b.classList.toggle('active', b.getAttribute('data-view') === v);
-    });
-    window.scrollTo({top:0});
-  }
-  Array.prototype.forEach.call(document.querySelectorAll('#tabs .tab'), function(b){
-    b.addEventListener('click', function(){ showView(b.getAttribute('data-view')); });
-  });
-
-  // ---------- histórico ----------
-  function getRecs(){
-    try{ return JSON.parse(localStorage.getItem(REC_KEY)) || []; }
-    catch(e){ return []; }
-  }
-  function saveRecs(list){ localStorage.setItem(REC_KEY, JSON.stringify(list)); }
-  function nextRecNumero(list){
-    return list.length ? Math.max.apply(null, list.map(function(r){ return r.numero||0; })) + 1 : 1;
-  }
-  function pagoAntesDoOrc(orc){
-    orc = String(orc||'').replace(/\D/g,'').replace(/^0+/,'');
-    if(!orc) return 0;
-    return getRecs().reduce(function(s,r){
-      var o = String(r.orc||'').replace(/\D/g,'').replace(/^0+/,'');
-      return o===orc ? s + (r.valor||0) : s;
-    }, 0);
-  }
-
-  // ---------- cálculo ----------
   function recCalc(){
     var total = parseNum($('recTotal').value);
     var valor = parseNum($('recValor').value);
@@ -456,10 +659,20 @@
     $('recTotPago').textContent  = fmtBRL(pago);
     $('recTotSaldo').textContent = fmtBRL(saldo > 0 ? saldo : 0);
     $('recTotSaldo').classList.toggle('quitado', total > 0 && Math.abs(saldo) <= 0.004);
+    refreshPreviews();
     return {total:total, valor:valor, ant:ant, pago:pago, saldo:saldo};
   }
   ['recTotal','recValor','recAnterior'].forEach(function(id){ $(id).addEventListener('input', recCalc); });
   $('recAnterior').addEventListener('input', function(){ recAntTocado = true; });
+
+  function pagoAntesDoOrc(orc){
+    orc = String(orc||'').replace(/\D/g,'').replace(/^0+/,'');
+    if(!orc) return 0;
+    return getRecs().reduce(function(s,r){
+      var o = String(r.orc||'').replace(/\D/g,'').replace(/^0+/,'');
+      return o === orc ? s + (r.valor||0) : s;
+    }, 0);
+  }
   $('recOrc').addEventListener('input', function(){
     if(recAntTocado) return;
     var p = pagoAntesDoOrc($('recOrc').value);
@@ -467,7 +680,36 @@
     recCalc();
   });
 
-  // ---------- a partir de um orçamento ----------
+  function novoRec(){
+    ['recCliente','recServico','recOrc','recTotal','recValor','recAnterior'].forEach(function(id){ $(id).value = ''; });
+    $('recTipo').selectedIndex = 0;
+    $('recForma').selectedIndex = 0;
+    $('recData').value = todayISO();
+    $('recObs').value = REC_OBS_PADRAO;
+    $('recOrigem').hidden = true;
+    recAntTocado = false; recFeito = false;
+    recCalc();
+    goRec(1);
+  }
+  function hasDraftRec(){
+    return !recFeito && ($('recCliente').value.trim() || $('recTotal').value.trim() || $('recValor').value.trim());
+  }
+  function iniciarRec(){
+    if(!hasDraftRec()){ novoRec(); show('rec'); return; }
+    modal({titulo:'Você já começou um comprovante', texto:'O que deseja fazer?', buttons:[
+      {label:'▶ Continuar de onde parei', value:'c', kind:'primary'},
+      {label:'🆕 Começar um novo do zero', value:'n'}
+    ]}).then(function(v){
+      if(v === 'c') show('rec');
+      else { novoRec(); show('rec'); }
+    });
+  }
+  function descartarRecSe(fn){
+    if(!hasDraftRec()){ fn(); return; }
+    confirmar('Descartar o comprovante em andamento?', 'Você tem um comprovante começado. Se continuar, ele será apagado.', 'Sim, descartar e abrir', true)
+      .then(function(ok){ if(ok) fn(); });
+  }
+
   function servicoDoOrcamento(o){
     var it = (o.itens||[])[0];
     var linha = it && it.desc ? it.desc.split('\n')[0].trim() : '';
@@ -476,64 +718,124 @@
     return linha.length > 40 ? linha.slice(0,40).trim() : linha;
   }
   function abrirRecDoOrcamento(o){
-    limparRec(true);
-    var numero = pad4(o.numero);
-    var ant = pagoAntesDoOrc(numero);
-    $('recCliente').value = o.cliente || '';
-    $('recServico').value = servicoDoOrcamento(o);
-    $('recOrc').value = numero;
-    $('recTotal').value = numParaCampo(o.liquido || 0);
-    if(ant > 0){
-      $('recAnterior').value = numParaCampo(ant);
+    descartarRecSe(function(){
+      novoRec();
+      var numero = pad4(o.numero);
+      var ant = pagoAntesDoOrc(numero);
+      $('recCliente').value = o.cliente || '';
+      $('recServico').value = servicoDoOrcamento(o);
+      $('recOrc').value = numero;
+      $('recTotal').value = numParaCampo(o.liquido || 0);
+      if(ant > 0){ $('recAnterior').value = numParaCampo(ant); $('recTipo').value = 'Parcela'; }
+      $('recOrigem').textContent = 'Os dados vieram do orçamento nº ' + numero + '. O total é o valor à vista (' + fmtBRL(o.liquido||0) + '). Se vocês fecharam outro valor, corrija o total.';
+      $('recOrigem').hidden = false;
+      recCalc();
+      show('rec');
+      goRec(2);
+      $('recValor').focus();
+    });
+  }
+  function abrirRecDoSaldo(r){
+    descartarRecSe(function(){
+      novoRec();
+      $('recCliente').value = r.cliente;
+      $('recServico').value = r.servico;
+      $('recOrc').value = r.orc || '';
+      $('recTotal').value = numParaCampo(r.total);
+      $('recAnterior').value = numParaCampo(r.total - r.saldo);
       $('recTipo').value = 'Parcela';
-    }
-    $('recOrigem').textContent = 'Baseado no orçamento #' + numero + '. O total veio do valor à vista (' + fmtBRL(o.liquido||0) + '); se vocês fecharam outro valor, ajuste o total.';
-    recCalc();
-    showView('rec');
-    $('recValor').focus();
-  }
-  $('btnRecDoOrc').addEventListener('click', function(){
-    if(ultimoOrc) abrirRecDoOrcamento(ultimoOrc);
-  });
-
-  // ---------- limpar ----------
-  function limparRec(silencioso){
-    if(!silencioso && !confirm('Limpar todos os campos do comprovante atual?')) return;
-    ['recCliente','recServico','recOrc','recTotal','recValor','recAnterior'].forEach(function(id){ $(id).value=''; });
-    $('recTipo').selectedIndex = 0;
-    $('recForma').selectedIndex = 0;
-    $('recData').value = todayISO();
-    $('recObs').value = REC_OBS_PADRAO;
-    $('recOrigem').textContent = recOrigemPadrao;
-    $('recPdfCard').style.display = 'none';
-    recAntTocado = false;
-    recCalc();
-  }
-  $('btnRecNovo').addEventListener('click', function(){ limparRec(false); });
-
-  // ---------- histórico na tela ----------
-  function renderRecs(){
-    var list = getRecs().slice().reverse();
-    var wrap = $('recHistWrap');
-    $('recHistCount').textContent = list.length;
-    if(!list.length){
-      wrap.innerHTML = '<div class="empty">Nenhum comprovante salvo ainda</div>';
-      return;
-    }
-    wrap.innerHTML = '';
-    list.forEach(function(r){
-      var row = document.createElement('div');
-      row.className = 'hist';
-      row.innerHTML =
-        '<div><div class="h-name">REC-'+pad4(r.numero)+' · '+esc(r.cliente||'Sem nome')+'</div>'+
-        '<div class="h-meta">'+esc(isoParaBR(r.dataISO))+' · '+fmtBRL(r.valor)+' · saldo '+fmtBRL(r.saldo>0?r.saldo:0)+'</div></div>'+
-        '<div class="h-actions"><button type="button" class="b-pdf">PDF</button></div>';
-      row.querySelector('.b-pdf').addEventListener('click', function(){ baixarRec(r, true); });
-      wrap.appendChild(row);
+      $('recOrigem').textContent = 'Novo pagamento de ' + r.cliente + '. Falta receber ' + fmtBRL(r.saldo) + '.';
+      $('recOrigem').hidden = false;
+      recCalc();
+      show('rec');
+      goRec(2);
+      $('recValor').focus();
     });
   }
 
-  // ---------- PDF do comprovante ----------
+  function recPrev(){
+    if(recStep === 1) show('home'); else goRec(recStep - 1);
+  }
+  function validarRecPasso1(){
+    if(!$('recCliente').value.trim()){ goRec(1); aviso('Escreva o nome do cliente.', $('recCliente')); return false; }
+    if(!$('recServico').value.trim()){ goRec(1); aviso('Escreva qual foi o serviço.', $('recServico')); return false; }
+    return true;
+  }
+  function validarRecPasso2(){
+    var c = recCalc();
+    if(c.total <= 0){ goRec(2); aviso('Coloque o valor total do serviço.', $('recTotal')); return false; }
+    if(c.valor <= 0){ goRec(2); aviso('Coloque quanto o cliente está pagando agora.', $('recValor')); return false; }
+    if(c.pago > c.total + 0.004){ goRec(2); aviso('O valor pago passa do total do serviço. Confira os valores.', $('recValor')); return false; }
+    return true;
+  }
+  function recNext(){
+    if(recStep === 1){ if(validarRecPasso1()) goRec(2); }
+    else if(recStep === 2){ if(validarRecPasso2()) goRec(3); }
+    else if(recStep === 3){ gerarComprovante(); }
+  }
+
+  function renderResumoRec(){
+    var c = recCalc();
+    var h = '<div class="sum-row"><span>Cliente</span><b>' + esc($('recCliente').value.trim()) + '</b></div>' +
+      '<div class="sum-row"><span>Serviço</span><b>' + esc($('recServico').value.trim()) + '</b></div>' +
+      '<div class="sum-row"><span>Como pagou</span><b>' + esc($('recForma').value) + '</b></div>' +
+      '<div class="sum-row"><span>Data</span><b>' + esc(isoParaBR($('recData').value || todayISO())) + '</b></div>';
+    if(c.ant > 0.004) h += '<div class="sum-row"><span>Já pago antes</span><b>' + fmtBRL(c.ant) + '</b></div>';
+    h += '<div class="sum-row"><span>Total do serviço</span><b>' + fmtBRL(c.total) + '</b></div>';
+    h += '<div class="sum-row"><span>' + (c.saldo <= 0.004 ? 'Situação' : 'Falta pagar') + '</span><b>' + (c.saldo <= 0.004 ? 'Quitado ✔' : fmtBRL(c.saldo)) + '</b></div>';
+    h += '<div class="sum-total"><span>Pago agora</span><span>' + fmtBRL(c.valor) + '</span></div>';
+    $('resumoRec').innerHTML = h;
+  }
+
+  function gerarComprovante(){
+    if(!validarRecPasso1() || !validarRecPasso2()) return;
+    var c = recCalc();
+    var list = getRecs();
+    var orc = $('recOrc').value.replace(/\D/g,'');
+    var r = {
+      numero: nextNumero(list),
+      cliente: $('recCliente').value.trim(),
+      servico: $('recServico').value.trim(),
+      orc: orc ? pad4(orc) : '',
+      tipo: $('recTipo').value,
+      forma: $('recForma').value,
+      dataISO: $('recData').value || todayISO(),
+      total: c.total,
+      valor: c.valor,
+      anterior: c.ant,
+      saldo: Math.max(c.saldo, 0),
+      obs: $('recObs').value.trim()
+    };
+    list.push(r);
+    saveRecs(list);
+    recFeito = true;
+    entregarRec(r).then(function(){
+      toast('Pronto! Comprovante REC-' + pad4(r.numero) + ' gerado.');
+    });
+  }
+
+  function entregarRec(r){
+    return Promise.resolve(logoPromise).then(function(){
+      var doc = montarComprovante(r);
+      var fname = 'comprovante-' + pad4(r.numero) + '-' + slug(r.cliente) + '.pdf';
+      var blob = doc.output('blob');
+      var url = URL.createObjectURL(blob);
+      try{ lastRecFile = new File([blob], fname, {type:'application/pdf'}); }catch(e){ lastRecFile = null; }
+      atualizarClientes();
+      lastRecTel = clientesTel[r.cliente] || '';
+      lastRecMsg = 'Olá! Segue o comprovante de pagamento REC-' + pad4(r.numero) + ' (' + fmtBRL(r.valor) + ') referente a ' + r.servico + ' - ' + EMPRESA.nome + '.';
+      try{
+        var a = document.createElement('a');
+        a.href = url; a.download = fname;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }catch(e){}
+      $('recPdfLink').href = url;
+      $('recPdfLink').setAttribute('download', fname);
+      $('recDoneTxt').textContent = 'Comprovante REC-' + pad4(r.numero) + ' de ' + r.cliente + ' pronto!';
+      show('rec');
+      goRec(4);
+    });
+  }
   function pdfTxt(s){ return String(s).replace(/\u2014|\u2013/g,'-'); }
 
   function montarComprovante(r){
@@ -687,70 +989,266 @@
     return doc;
   }
 
-  function nomeArquivoRec(r){
-    return 'comprovante-' + pad4(r.numero) + '-' + String(r.cliente).toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') + '.pdf';
+  // =====================================================================
+  // CLIENTES E WHATSAPP
+  // =====================================================================
+  function atualizarClientes(){
+    clientesTel = {};
+    var nomes = [];
+    getHistorico().forEach(function(o){
+      if(!o.cliente) return;
+      if(nomes.indexOf(o.cliente) < 0) nomes.push(o.cliente);
+      if(o.telefone) clientesTel[o.cliente] = o.telefone;
+    });
+    getRecs().forEach(function(r){ if(r.cliente && nomes.indexOf(r.cliente) < 0) nomes.push(r.cliente); });
+    var dl = $('cliList');
+    dl.innerHTML = '';
+    nomes.sort().forEach(function(n){
+      var op = document.createElement('option'); op.value = n; dl.appendChild(op);
+    });
+  }
+  $('cliNome').addEventListener('input', function(){
+    var tel = clientesTel[this.value];
+    if(tel && !$('cliTel').value.trim()) $('cliTel').value = tel;
+  });
+
+  function compartilhar(file, texto, tel){
+    if(file && navigator.canShare && navigator.canShare({files:[file]})){
+      navigator.share({files:[file], text:texto}).catch(function(){});
+      return;
+    }
+    var d = String(tel||'').replace(/\D/g,'');
+    if(d && d.length <= 11) d = '55' + d;
+    window.open('https://wa.me/' + d + '?text=' + encodeURIComponent(texto), '_blank');
+    toast('O WhatsApp abriu. Anexe o PDF que foi baixado.');
   }
 
-  function baixarRec(r, soBaixar){
-    Promise.resolve(logoPromise).then(function(){
-      var doc = montarComprovante(r);
-      var fname = nomeArquivoRec(r);
-      var url = URL.createObjectURL(doc.output('blob'));
-      try{
-        var a = document.createElement('a');
-        a.href = url; a.download = fname;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      }catch(e){}
-      var card = $('recPdfCard'), link = $('recPdfLink');
-      link.href = url; link.setAttribute('download', fname);
-      card.style.display = 'block';
-      if(soBaixar){ showView('rec'); }
-      card.scrollIntoView({behavior:'smooth', block:'start'});
+  // =====================================================================
+  // O QUE JÁ FIZ
+  // =====================================================================
+  function setHistTab(t){
+    histTab = t;
+    $('tabOrc').className = t === 'orc' ? 'on' : '';
+    $('tabRec').className = t === 'rec' ? 'on' : '';
+    $('histWrap').hidden = (t !== 'orc');
+    $('recHistWrap').hidden = (t !== 'rec');
+    renderHist();
+  }
+  $('tabOrc').addEventListener('click', function(){ setHistTab('orc'); });
+  $('tabRec').addEventListener('click', function(){ setHistTab('rec'); });
+  $('histBusca').addEventListener('input', function(){ renderHist(); });
+
+  function toggleMais(row){
+    var m = row.querySelector('.rc-more'), b = row.querySelector('.b-more');
+    m.hidden = !m.hidden;
+    b.textContent = m.hidden ? 'Mais opções ▾' : 'Fechar opções ▴';
+  }
+
+  function renderHist(){
+    atualizarClientes();
+    var todosO = getHistorico(), todosR = getRecs();
+    $('tabOrc').textContent = 'Orçamentos (' + todosO.length + ')';
+    $('tabRec').textContent = 'Comprovantes (' + todosR.length + ')';
+    var q = $('histBusca').value.trim().toLowerCase();
+    function bate(x){ return !q || String(x.cliente||'').toLowerCase().indexOf(q) >= 0; }
+
+    var wo = $('histWrap'), wr = $('recHistWrap');
+    var lo = todosO.slice().reverse().filter(bate), lr = todosR.slice().reverse().filter(bate);
+
+    wo.innerHTML = '';
+    if(!lo.length) wo.innerHTML = '<div class="empty">' + (todosO.length ? 'Nenhum orçamento com esse nome.' : 'Você ainda não fez nenhum orçamento.') + '</div>';
+    lo.forEach(function(o){
+      var row = document.createElement('div');
+      row.className = 'rowcard';
+      row.innerHTML =
+        '<div class="rc-top"><div><div class="rc-name">' + esc(o.cliente || 'Sem nome') + '</div>' +
+        '<div class="rc-meta">Orçamento nº ' + pad4(o.numero) + ' · ' + esc(o.dataBR) + '</div></div>' +
+        '<div class="rc-val">' + fmtBRL(o.liquido) + '</div></div>' +
+        '<button type="button" class="big primary b-pdf">📄 Ver PDF e enviar</button>' +
+        '<button type="button" class="link center b-more">Mais opções ▾</button>' +
+        '<div class="rc-more" hidden>' +
+        '<button type="button" class="big b-edit">✏️ Corrigir este orçamento</button>' +
+        '<button type="button" class="big b-dup">📋 Copiar para outro cliente</button>' +
+        '<button type="button" class="big b-rec">🧾 Fazer comprovante</button>' +
+        '<button type="button" class="big danger b-del">🗑️ Apagar este orçamento</button></div>';
+      row.querySelector('.b-pdf').addEventListener('click', function(){ entregarOrc(o); });
+      row.querySelector('.b-more').addEventListener('click', function(){ toggleMais(row); });
+      row.querySelector('.b-edit').addEventListener('click', function(){ editarOrc(o, false); });
+      row.querySelector('.b-dup').addEventListener('click', function(){ editarOrc(o, true); });
+      row.querySelector('.b-rec').addEventListener('click', function(){ abrirRecDoOrcamento(o); });
+      row.querySelector('.b-del').addEventListener('click', function(){
+        confirmar('Apagar este orçamento?', 'Orçamento nº ' + pad4(o.numero) + ' de ' + (o.cliente || 'Sem nome') + '. Não dá para desfazer.', 'Sim, apagar', true).then(function(ok){
+          if(!ok) return;
+          saveHistorico(getHistorico().filter(function(x){ return x.numero !== o.numero; }));
+          renderHist();
+          toast('Orçamento apagado.');
+        });
+      });
+      wo.appendChild(row);
+    });
+
+    wr.innerHTML = '';
+    if(!lr.length) wr.innerHTML = '<div class="empty">' + (todosR.length ? 'Nenhum comprovante com esse nome.' : 'Você ainda não fez nenhum comprovante.') + '</div>';
+    lr.forEach(function(r){
+      var row = document.createElement('div');
+      row.className = 'rowcard';
+      row.innerHTML =
+        '<div class="rc-top"><div><div class="rc-name">' + esc(r.cliente || 'Sem nome') + '</div>' +
+        '<div class="rc-meta">Comprovante REC-' + pad4(r.numero) + ' · ' + esc(isoParaBR(r.dataISO)) + '</div></div>' +
+        '<div class="rc-val">' + fmtBRL(r.valor) + '</div></div>' +
+        '<div class="rc-sub ' + (r.saldo > 0.004 ? 'falta' : 'ok') + '">' + (r.saldo > 0.004 ? 'Falta receber ' + fmtBRL(r.saldo) : 'Quitado ✔') + '</div>' +
+        '<button type="button" class="big primary b-pdf">📄 Ver PDF e enviar</button>' +
+        '<button type="button" class="link center b-more">Mais opções ▾</button>' +
+        '<div class="rc-more" hidden>' +
+        '<button type="button" class="big danger b-del">🗑️ Apagar este comprovante</button></div>';
+      row.querySelector('.b-pdf').addEventListener('click', function(){ entregarRec(r); });
+      row.querySelector('.b-more').addEventListener('click', function(){ toggleMais(row); });
+      row.querySelector('.b-del').addEventListener('click', function(){
+        confirmar('Apagar este comprovante?', 'REC-' + pad4(r.numero) + ' de ' + (r.cliente || 'Sem nome') + '. O que falta receber desse serviço será refeito. Não dá para desfazer.', 'Sim, apagar', true).then(function(ok){
+          if(!ok) return;
+          saveRecs(getRecs().filter(function(x){ return x.numero !== r.numero; }));
+          renderHist();
+          toast('Comprovante apagado.');
+        });
+      });
+      wr.appendChild(row);
     });
   }
 
-  // ---------- gerar ----------
-  function gerarComprovante(){
-    var cliente = $('recCliente').value.trim();
-    var servico = $('recServico').value.trim();
-    var c = recCalc();
-    if(!cliente){ toast('Informe o nome do cliente'); $('recCliente').focus(); return; }
-    if(!servico){ toast('Informe o serviço'); $('recServico').focus(); return; }
-    if(c.total <= 0){ toast('Informe o valor total do serviço'); $('recTotal').focus(); return; }
-    if(c.valor <= 0){ toast('Informe o valor deste lançamento'); $('recValor').focus(); return; }
-    if(c.pago > c.total + 0.004){ toast('O valor pago passa do total do serviço'); $('recValor').focus(); return; }
-
-    var list = getRecs();
-    var orc = $('recOrc').value.replace(/\D/g,'');
-    var r = {
-      numero: nextRecNumero(list),
-      cliente: cliente,
-      servico: servico,
-      orc: orc ? pad4(orc) : '',
-      tipo: $('recTipo').value,
-      forma: $('recForma').value,
-      dataISO: $('recData').value || todayISO(),
-      total: c.total,
-      valor: c.valor,
-      anterior: c.ant,
-      saldo: Math.max(c.saldo, 0),
-      obs: $('recObs').value.trim()
-    };
-    list.push(r);
-    saveRecs(list);
-    renderRecs();
-    baixarRec(r, false);
-    toast('Comprovante gerado: REC-' + pad4(r.numero));
+  // =====================================================================
+  // QUANTO FALTA RECEBER
+  // =====================================================================
+  function calcAbertos(){
+    var g = {}, ordem = [];
+    getRecs().forEach(function(r){
+      var k = r.orc ? 'o' + r.orc : 'c' + String(r.cliente).toLowerCase() + '|' + String(r.servico).toLowerCase();
+      if(!g[k]) ordem.push(k);
+      g[k] = r;
+    });
+    return ordem.map(function(k){ return g[k]; }).filter(function(r){ return r.saldo > 0.004; });
   }
-  $('btnRecPdf').addEventListener('click', gerarComprovante);
+  function renderAbertos(){
+    var ab = calcAbertos(), soma = 0, wrap = $('abertosWrap');
+    wrap.innerHTML = '';
+    if(!ab.length) wrap.innerHTML = '<div class="empty">🎉 Ninguém está devendo no momento.</div>';
+    ab.forEach(function(r){
+      soma += r.saldo;
+      var row = document.createElement('div');
+      row.className = 'rowcard';
+      row.innerHTML =
+        '<div class="rc-top"><div><div class="rc-name">' + esc(r.cliente) + '</div>' +
+        '<div class="rc-meta">' + esc(r.servico) + (r.orc ? ' · orçamento nº ' + esc(r.orc) : '') + '</div>' +
+        '<div class="rc-meta">Total do serviço: ' + fmtBRL(r.total) + '</div></div>' +
+        '<div class="rc-val">' + fmtBRL(r.saldo) + '</div></div>' +
+        '<button type="button" class="big primary">➕ Registrar novo pagamento</button>';
+      row.querySelector('button').addEventListener('click', function(){ abrirRecDoSaldo(r); });
+      wrap.appendChild(row);
+    });
+    $('abertosTotal').textContent = fmtBRL(soma);
+  }
 
-  // init
+  // =====================================================================
+  // INÍCIO E CÓPIA DE SEGURANÇA
+  // =====================================================================
+  function renderHome(){
+    var ab = calcAbertos(), soma = ab.reduce(function(s,r){ return s + r.saldo; }, 0);
+    $('homeAbertosTxt').textContent = ab.length
+      ? fmtBRL(soma) + ' · ' + ab.length + (ab.length > 1 ? ' clientes' : ' cliente')
+      : 'Ninguém devendo no momento';
+    var temDados = getHistorico().length + getRecs().length > 0;
+    var ultimo = localStorage.getItem(BK_KEY);
+    var velho = true;
+    if(ultimo){
+      var d = new Date(ultimo + 'T00:00:00');
+      velho = (Date.now() - d.getTime()) / 86400000 > 30;
+    }
+    $('bkBanner').hidden = !(temDados && velho);
+  }
+
+  $('btnExport').addEventListener('click', function(){
+    var data = {app:'cearapla', versao:1, exportadoEm:todayISO(), orcamentos:getHistorico(), comprovantes:getRecs(), modelos:getModelos()};
+    var url = URL.createObjectURL(new Blob([JSON.stringify(data)], {type:'application/json'}));
+    var a = document.createElement('a');
+    a.href = url; a.download = 'cearapla-copia-' + todayISO() + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    localStorage.setItem(BK_KEY, todayISO());
+    toast('Cópia guardada! Procure o arquivo em "Downloads".');
+  });
+  $('btnImport').addEventListener('click', function(){ $('fileImport').click(); });
+  $('fileImport').addEventListener('change', function(){
+    var inp = this, f = inp.files[0];
+    if(!f) return;
+    var rd = new FileReader();
+    rd.onload = function(){
+      var d = null;
+      try{ d = JSON.parse(rd.result); }catch(e){}
+      if(!d || d.app !== 'cearapla' || !Array.isArray(d.orcamentos) || !Array.isArray(d.comprovantes)){
+        aviso('Esse arquivo não é uma cópia do aplicativo.'); inp.value = ''; return;
+      }
+      confirmar('Recuperar esta cópia?',
+        'Hoje o celular tem ' + getHistorico().length + ' orçamentos e ' + getRecs().length + ' comprovantes. A cópia tem ' + d.orcamentos.length + ' e ' + d.comprovantes.length + '. Ao recuperar, o que está no celular será trocado pela cópia.',
+        'Sim, recuperar', true).then(function(ok){
+        inp.value = '';
+        if(!ok) return;
+        saveHistorico(d.orcamentos); saveRecs(d.comprovantes); saveModelos(Array.isArray(d.modelos) ? d.modelos : []);
+        renderModelos(); renderModelosLista();
+        toast('Cópia recuperada com sucesso!');
+      });
+    };
+    rd.readAsText(f);
+  });
+
+  // =====================================================================
+  // LIGAÇÕES DOS BOTÕES
+  // =====================================================================
+  Array.prototype.forEach.call(document.querySelectorAll('[data-go]'), function(b){
+    b.addEventListener('click', function(){
+      var g = b.getAttribute('data-go');
+      if(g === 'orc') iniciarOrc();
+      else if(g === 'rec') iniciarRec();
+      else if(g === 'hist'){ setHistTab(histTab); show('hist'); }
+      else show(g);
+    });
+  });
+  $('btnBack').addEventListener('click', function(){ show('home'); });
+  $('btnPrev').addEventListener('click', function(){ if(screen === 'orc') orcPrev(); else recPrev(); });
+  $('btnNext').addEventListener('click', function(){ if(screen === 'orc') orcNext(); else recNext(); });
+  $('btnDoneHomeOrc').addEventListener('click', function(){ show('home'); });
+  $('btnDoneHomeRec').addEventListener('click', function(){ show('home'); });
+  $('btnShareOrc').addEventListener('click', function(){ compartilhar(lastOrcFile, lastOrcMsg, lastOrcTel); });
+  $('btnShareRec').addEventListener('click', function(){ compartilhar(lastRecFile, lastRecMsg, lastRecTel); });
+  $('btnRecDoOrc').addEventListener('click', function(){ if(ultimoOrc) abrirRecDoOrcamento(ultimoOrc); });
+  $('scr-orc').addEventListener('input', function(){ orcFeito = false; });
+  $('scr-rec').addEventListener('input', function(){ recFeito = false; });
+
+  function carregarLogoBase64(){
+    return new Promise(function(resolve){
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var canvas = document.createElement('canvas');
+          canvas.width = img.width; canvas.height = img.height;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          LOGO_B64 = canvas.toDataURL('image/png').split(',')[1];
+        }catch(e){ LOGO_B64 = null; }
+        resolve();
+      };
+      img.onerror = function(){ resolve(); };
+      img.src = 'icon-512.png?v=2';
+    });
+  }
+
+  // ---------- início ----------
+  ['recTotal','recValor','recAnterior'].forEach(function(id){ bindMoney($(id)); });
+  $('recData').value = todayISO();
   addItem();
   calcTotals();
-  renderHistorico();
-  $("recData").value = todayISO();
   recCalc();
-  renderRecs();
+  renderModelos();
+  atualizarClientes();
+  goOrc(1);
+  goRec(1);
+  try{ history.replaceState({s:'home'}, ''); }catch(e){}
+  show('home', true);
   logoPromise = carregarLogoBase64();
 })();

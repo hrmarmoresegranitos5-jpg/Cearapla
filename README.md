@@ -1,41 +1,30 @@
-# Ceará Planejados · Orçamentos
+# Ceará Planejados - Orçamentos e Comprovantes
 
-App (PWA) para gerar orçamentos em PDF de móveis planejados, no mesmo modelo visual do sistema da HR Mármores e Granitos.
+Aplicativo (PWA) para fazer orçamentos e comprovantes de pagamento em PDF, pensado para ser simples de usar.
 
-## Estrutura
+## Como usar
 
-```
-index.html      → estrutura da página
-styles.css       → estilos
-app.js           → lógica (itens, totais, histórico, geração do PDF)
-manifest.json    → configuração do PWA (nome, ícones, tela cheia)
-sw.js            → service worker (funciona offline / instala como app)
-icons/           → ícones do app (gerados a partir do logo)
-```
+Na tela inicial há quatro botões grandes:
 
-## Comprovante de pagamento
+- **Fazer um orçamento:** passo a passo em 4 telas (cliente, itens, valores, conferir). No fim, o PDF é gerado e dá para enviar pelo WhatsApp.
+- **Fazer um comprovante:** passo a passo em 3 telas (quem pagou, quanto foi pago, conferir).
+- **Ver o que já fiz:** orçamentos e comprovantes antigos, com busca por nome. Cada um tem "Ver PDF e enviar" e, em "Mais opções", corrigir, copiar para outro cliente, fazer comprovante e apagar.
+- **Quanto falta receber:** lista de quem ainda deve, com o total. Cada cliente tem o botão "Registrar novo pagamento".
 
-Aba **Comprovante** no topo do app. Dois jeitos de usar:
+Em **Mais opções** ficam a cópia de segurança e os itens guardados.
 
-- **A partir de um orçamento:** no histórico, toque em **Comprovante** (ou, logo depois de gerar o PDF do orçamento, em "Criar comprovante deste orçamento"). Cliente, serviço, nº do orçamento e total já vêm preenchidos; informe o valor recebido.
-- **Avulso:** preencha tudo manualmente na aba Comprovante.
+## Detalhes
 
-Se o mesmo orçamento já tem comprovantes, o app soma o que foi pago antes e mostra o saldo certo. O CNPJ da empresa é configurado em `app.js` (campo `cnpj` em `EMPRESA`); enquanto estiver vazio ele não aparece no PDF.
+- Os valores aceitam "13400", "13.400" ou "13.400,50" e o app mostra o valor por extenso embaixo do campo.
+- "Corrigir este orçamento" mantém o mesmo número e atualiza o registro. "Copiar para outro cliente" cria um orçamento novo com os mesmos itens.
+- Se o mesmo orçamento já tem comprovantes, o app soma o que foi pago antes e calcula o que falta.
+- O app avisa quando faz mais de 30 dias que não é feita uma cópia de segurança.
+- O CNPJ da empresa é configurado em `app.js` (campo `cnpj` em `EMPRESA`); enquanto estiver vazio, ele não aparece no comprovante.
 
-## Como publicar no GitHub Pages
+## Como publicar (GitHub Pages)
 
-1. Crie um repositório novo no GitHub (ex: `ceara-planejados-orcamentos`)
-2. Suba todos os arquivos desta pasta para a raiz do repositório
-3. Vá em **Settings → Pages**
-4. Em "Branch", selecione `main` (ou `master`) e pasta `/ (root)`
-5. Salve. Em alguns minutos o link ficará disponível, algo como:
-   `https://SEU-USUARIO.github.io/ceara-planejados-orcamentos/`
+1. Suba todos os arquivos para o repositório.
+2. Em Settings > Pages, escolha a branch `main` e a pasta `/ (root)`.
+3. Abra o endereço no celular e use "Adicionar à tela inicial".
 
-## Instalar como app no celular
-
-Depois de publicado, abra o link no Chrome do celular → menu (⋮) → **"Adicionar à tela inicial"** / **"Instalar app"**. Ele passa a abrir como um app normal, com ícone próprio.
-
-## Observações
-
-- O histórico de orçamentos fica salvo no próprio navegador/aparelho (localStorage) — não é enviado pra nenhum servidor.
-- O PDF é gerado no próprio celular (biblioteca jsPDF), sem precisar de internet depois que o app carregou uma vez (graças ao service worker).
+Quando atualizar os arquivos, altere o número da versão em `CACHE_NAME` no `sw.js` para os celulares pegarem a versão nova.
